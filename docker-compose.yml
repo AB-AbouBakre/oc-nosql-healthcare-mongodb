@@ -1,0 +1,31 @@
+version: "3.9"
+
+services:
+  mongo:
+    image: mongo:6.0
+    container_name: medical-mongo
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: root
+      MONGO_INITDB_ROOT_PASSWORD: rootpassword
+      MONGO_INITDB_DATABASE: medical_db
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+
+  migration:
+    build: .
+    container_name: medical-migration
+    depends_on:
+      - mongo
+    environment:
+      # Surcharge l'URI par défaut du Dockerfile si besoin
+      MONGO_URI: "mongodb://root:rootpassword@mongo:27017/medical_db?authSource=admin"
+    volumes:
+      - ./data:/app/data
+    # On peut relancer la migration explicitement si besoin
+    command: ["python", "src/migrate.py"]
+
+volumes:
+  mongo_data:
