@@ -20,11 +20,7 @@ services:
     depends_on:
       - mongo
     environment:
-      # Surcharge l'URI par défaut du Dockerfile si besoin
       MONGO_URI: "mongodb://root:rootpassword@mongo:27017/medical_db?authSource=admin"
-    volumes:
-      - ./data:/app/data
-    # On peut relancer la migration explicitement si besoin
     command: ["python", "src/migrate.py"]
 
 volumes:
