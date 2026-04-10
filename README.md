@@ -136,6 +136,20 @@ Exemple de document :
 
 Ce script permet de valider rapidement que la migration a abouti.
 
+### Tests d'intégrité des données
+
+Le script `tests/data_quality.py` permet de réaliser des vérifications simples sur la qualité des données :
+
+- comparaison du nombre de lignes dans le CSV et du nombre de documents dans MongoDB,
+- résumé des valeurs manquantes par colonne,
+- affichage des types de colonnes inférés par pandas,
+- détection de doublons sur les colonnes `Name`, `Date of Admission`, `Hospital`.
+
+Exécution :
+
+```bash
+python tests/data_quality.py
+```
 ## Schéma MongoDB et authentification
 
 ### Schéma de la base
