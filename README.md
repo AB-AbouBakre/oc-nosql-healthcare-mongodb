@@ -1,47 +1,78 @@
 # Migration de données médicales vers MongoDB
 
-Ce projet implémente une pipeline de migration de données à partir d'un fichier CSV (`healthcare_dataset.csv`) vers une base de données MongoDB. Les données sont chargées via un script Python et insérées dans une collection MongoDB, hébergée dans un conteneur Docker. Un script de vérification permet de contrôler le nombre de documents migrés et d’inspecter un exemple de document.
+Ce projet met en place une pipeline de migration de données à partir d’un fichier CSV (`healthcare_dataset.csv`) vers une base de données **MongoDB** dockerisée.  
+L’objectif est de charger un jeu de données médicales (55 500 lignes) dans MongoDB, de vérifier la qualité des données et de préparer une architecture simple et reproductible avec **Docker**.
 
 ## Table des matières
 
+- [Contexte](#contexte)
+- [Architecture technique](#architecture-technique)
 - [Prérequis](#prérequis)
 - [Structure du projet](#structure-du-projet)
-- [Installation](#installation)
-- [Exécution de la migration](#exécution-de-la-migration)
-- [Vérification des données](#vérification-des-données)
+- [Lancer la migration avec Docker](#lancer-la-migration-avec-docker)
+- [Vérification et qualité des données](#vérification-et-qualité-des-données)
 - [Schéma MongoDB et authentification](#schéma-mongodb-et-authentification)
-- [Pistes d’évolution (tests, Docker Compose, AWS)](#pistes-dévolution-tests-docker-compose-aws)
+- [Pistes d’industrialisation](#pistes-dindustrialisation)
+
+## Contexte
+
+Ce projet s’inscrit dans la mission **« Migrez des données médicales à l’aide du NoSQL »**.  
+À partir d’un fichier CSV contenant des informations sur des patients (nom, âge, type de sang, dates d’admission et de sortie, médecin, hôpital, etc.), il s’agit de :
+
+- migrer les données vers une base **MongoDB** ;
+- vérifier que la migration est complète et cohérente ;
+- mettre en place une authentification basique au niveau de la base ;
+- documenter l’architecture pour une future industrialisation.
+
+## Architecture technique
+
+L’architecture repose sur :
+
+- un fichier **CSV** source dans le répertoire `data/` (par ex. `data/healthcare_dataset.csv`) ;
+- un script Python de **migration** : `src/migrate.py`, qui :
+  - lit le CSV avec `pandas` ;
+  - se connecte à MongoDB avec `pymongo` ;
+  - insère les 55 500 lignes dans une collection MongoDB (par ex. `patients`) ;
+- un script Python de **contrôle qualité** : `tests/data_quality.py`, qui compare le CSV et la base MongoDB et analyse la qualité des données ;
+- un script de **vérification rapide** : `tests/check_db.py`, qui affiche le nombre de documents et un exemple de document ;
+- un fichier **`Dockerfile`** pour construire l’image du conteneur de migration ;
+- un fichier **`docker-compose.yml`** qui orchestre 2 services :
+  - `medical-mongo` : base MongoDB (image officielle `mongo:6.0`), avec un utilisateur administrateur ;
+  - `medical-migration` : conteneur Python qui exécute `src/migrate.py`.
+
+Les services communiquent via un réseau Docker nommé `medical-net`, et les données MongoDB sont stockées dans un volume `mongo_data`.
 
 ## Prérequis
 
-Pour exécuter ce projet localement, il est nécessaire d’avoir installé :
+Pour exécuter ce projet :
 
-- **Python 3.x**
-- **Docker** (pour exécuter MongoDB dans un conteneur)
-- **Git** (pour cloner le dépôt)
-
-Les dépendances Python spécifiques (pandas, pymongo, etc.) sont listées dans `requirements.txt`.
+- **Docker Desktop** installé et démarré ;
+- **Git** pour cloner le dépôt ;
+- **Python 3.x** pour exécuter les scripts locaux (`tests/data_quality.py`, `tests/check_db.py`) si nécessaire ;
+- Les dépendances Python (`pandas`, `pymongo`, …) installées via `pip install -r requirements.txt` si vous exécutez les scripts hors Docker.
 
 ## Structure du projet
 
 ```text
 oc-nosql-medical/
-├── .venv/                     # Environnement virtuel Python (non versionné)
 ├── data/
-│   └── healthcare_dataset.csv # Fichier CSV contenant les données médicales
+│   └── healthcare_dataset.csv      # Fichier CSV contenant les données médicales
 ├── src/
-│   └── migrate.py             # Script principal de migration CSV → MongoDB
+│   └── migrate.py                  # Script principal de migration CSV → MongoDB
 ├── tests/
-│   └── check_db.py            # Script de vérification du contenu MongoDB
-├── requirements.txt           # Dépendances Python (pymongo, pandas, …)
-├── Dockerfile                 # (à ajouter) Image pour exécuter la migration en conteneur
-├── docker-compose.yml         # (à ajouter) Orchestration MongoDB + migration
-└── README.md                  # Ce fichier
+│   ├── check_db.py                 # Script de vérification rapide (compte / exemple)
+│   └── data_quality.py             # Script de contrôle qualité (count, NA, types, doublons)
+├── init-mongo/
+│   └── init-users.js               # Création automatique de app_user et analyst_user
+├── requirements.txt                # Dépendances Python (pymongo, pandas, …)
+├── Dockerfile                      # Image Docker pour la migration
+├── docker-compose.yml              # Orchestration MongoDB + migration
+├── docs/
+│   └── schema.md                   # Schéma de la base MongoDB (structure des documents)
+└── README.md                       # Ce fichier
 ```
 
-*(Les fichiers `Dockerfile` et `docker-compose.yml` seront ajoutés dans une étape ultérieure du projet.)*
-
-## Installation
+## Lancer la migration avec Docker
 
 ### 1. Cloner le dépôt
 
@@ -50,71 +81,51 @@ git clone https://github.com/AB-AbouBakre/oc-nosql-healthcare-mongodb.git
 cd oc-nosql-healthcare-mongodb
 ```
 
-### 2. Créer et activer l’environnement virtuel
+### 2. Vérifier la présence du fichier CSV
 
-```bash
-python -m venv .venv
-source .venv/bin/activate  # macOS / Linux
-pip install -r requirements.txt
-```
-
-### 3. Vérifier la présence du fichier CSV
-
-Assurez-vous que le fichier suivant existe :
+Assurez-vous que le fichier suivant existe :
 
 ```text
 data/healthcare_dataset.csv
 ```
 
-Ce fichier contient les données médicales à migrer (par exemple des informations patients, mesures, diagnostics, etc.).
-
-## Exécution de la migration
-
-### 1. Démarrer MongoDB dans Docker
-
-Lancer une instance MongoDB accessible depuis la machine hôte :
+### 3. Lancer MongoDB et la migration
 
 ```bash
-docker run -d --name medical-mongo -p 27017:27017 \
-  -e MONGO_INITDB_ROOT_USERNAME=root \
-  -e MONGO_INITDB_ROOT_PASSWORD=rootpassword \
-  mongo:6.0
+docker compose up --build
 ```
 
-Cette commande démarre un conteneur MongoDB sur le port `27017`, avec un utilisateur administrateur `root` / `rootpassword`.
+Cette commande :
 
-### 2. Lancer le script de migration
+- démarre le service **`medical-mongo`** (MongoDB) avec la base `medical_db`, en créant un utilisateur root `root-oc` avec un mot de passe fort ;
+- monte le script `init-mongo/init-users.js` dans `/docker-entrypoint-initdb.d`, qui crée automatiquement :
+  - `app_user` (rôle `readWrite` sur `medical_db`) ;
+  - `analyst_user` (rôle `read` sur `medical_db`) ;
+- démarre le service **`medical-migration`**, qui :
+  - lit le CSV,
+  - affiche dans les logs :
 
-Depuis la racine du projet, avec l’environnement virtuel activé :
+    ```text
+    Lecture du CSV...
+    55500 lignes à insérer.
+    55500 documents insérés.
+    ```
+
+  - se termine une fois la migration terminée (code de sortie 0).
+
+### 4. Arrêter les services
 
 ```bash
-export MONGO_URI="mongodb://root:rootpassword@localhost:27017/medical_db?authSource=admin"
-python src/migrate.py
+docker compose down -v
 ```
 
-Le script `migrate.py` :
+Cela arrête les conteneurs et supprime les volumes si nécessaire.
 
-- lit le fichier `data/healthcare_dataset.csv` avec `pandas`,
-- remplace les valeurs manquantes (`NaN`) par `None` pour compatibilité MongoDB,
-- se connecte à la base `medical_db` de MongoDB,
-- insère toutes les lignes du CSV dans la collection `patients`,
-- affiche dans la console le nombre de lignes lues et de documents insérés,
-- effectue un comptage final des documents dans la collection.
+## Vérification et qualité des données
 
-Exemple de sortie :
+### Vérification rapide du contenu MongoDB
 
-```text
-Lecture du CSV...
-55500 lignes à insérer.
-55500 documents insérés.
-Nombre de documents dans la collection : 55500
-```
-
-*(les valeurs exactes dépendent du dataset)*
-
-## Vérification des données
-
-Un script de vérification simple est fourni dans `tests/check_db.py` :
+Le script `tests/check_db.py` permet de vérifier rapidement l’état de la collection :
 
 ```bash
 python tests/check_db.py
@@ -122,43 +133,44 @@ python tests/check_db.py
 
 Ce script :
 
-- se connecte à `medical_db.patients` via `pymongo`,
-- affiche le nombre total de documents présents dans la collection,
-- affiche un exemple de document pour contrôle visuel.
+- se connecte à `medical_db.patients` via `pymongo` ;
+- affiche le nombre total de documents ;
+- affiche un exemple de document.
 
-Exemple de sortie :
+Exemple de sortie :
 
 ```text
 Nombre de documents : 55500
 Exemple de document :
-{'_id': ObjectId('...'), 'Name': 'Bobby JacksOn', 'Age': 30, 'Gender': 'Male', 'Blood Type': 'B-', 'Medical Condition': 'Cancer', 'Date of Admission': '2024-01-31', 'Doctor': 'Matthew Smith', 'Hospital': 'Sons and Miller', 'Insurance Provider': 'Blue Cross', 'Billing Amount': 18856.281305978155, 'Room Number': 328, 'Admission Type': 'Urgent', 'Discharge Date': '2024-02-02', 'Medication': 'Paracetamol', 'Test Results': 'Normal'}
+{ "_id": ObjectId("..."), "Name": "...", "Age": 30, ... }
 ```
 
-Ce script permet de valider rapidement que la migration a abouti.
+### Contrôles de qualité des données
 
-### Tests d'intégrité des données
-
-Le script `tests/data_quality.py` permet de réaliser des vérifications simples sur la qualité des données :
-
-- comparaison du nombre de lignes dans le CSV et du nombre de documents dans MongoDB,
-- résumé des valeurs manquantes par colonne,
-- affichage des types de colonnes inférés par pandas,
-- détection de doublons sur les colonnes `Name`, `Date of Admission`, `Hospital`.
-
-Exécution :
+Le script `tests/data_quality.py` réalise des contrôles de qualité :
 
 ```bash
 python tests/data_quality.py
 ```
+
+Il :
+
+- compare le **nombre de lignes dans le CSV** et le **nombre de documents dans MongoDB** (55 500 vs 55 500) ;
+- affiche le résumé des **valeurs manquantes** par colonne (aucune valeur manquante détectée dans ce dataset) ;
+- affiche les **types de colonnes** inférés par `pandas` (entiers, flottants, chaînes, etc.) ;
+- détecte les **doublons potentiels** sur les colonnes `Name`, `Date of Admission`, `Hospital` (environ 5 500 lignes, soit ~10 %, correspondant possiblement à des réadmissions ou enregistrements multiples).
+
+Ces contrôles permettent de documenter la qualité de la migration et les éventuelles limites (présence de doublons métier).
+
 ## Schéma MongoDB et authentification
 
 ### Schéma de la base
 
-- Base de données : `medical_db`
-- Collection : `patients`
+- Base : `medical_db`  
+- Collection : `patients`  
 - Un document par ligne du CSV `healthcare_dataset.csv`.
 
-Les champs correspondent directement aux colonnes du fichier CSV. Un document typique ressemble à :
+Les champs correspondent aux colonnes du CSV. Exemple de document :
 
 ```json
 {
@@ -172,7 +184,7 @@ Les champs correspondent directement aux colonnes du fichier CSV. Un document ty
   "Doctor": "Matthew Smith",
   "Hospital": "Sons and Miller",
   "Insurance Provider": "Blue Cross",
-  "Billing Amount": 18856.281305978155,
+  "Billing Amount": 18856.28,
   "Room Number": 328,
   "Admission Type": "Urgent",
   "Discharge Date": "2024-02-02",
@@ -181,62 +193,50 @@ Les champs correspondent directement aux colonnes du fichier CSV. Un document ty
 }
 ```
 
-Types principaux utilisés par MongoDB dans cette première version :
+Types principaux :
 
-- `Name`, `Gender`, `Blood Type`, `Medical Condition`, `Doctor`, `Hospital`, `Insurance Provider`, `Admission Type`, `Medication`, `Test Results` : chaînes de caractères,
-- `Age`, `Room Number` : entiers,
-- `Billing Amount` : nombre à virgule flottante,
-- `Date of Admission`, `Discharge Date` : actuellement stockées comme chaînes de caractères (format `YYYY-MM-DD`) telles que fournies dans le CSV.
-
-Dans une itération ultérieure, ces champs de date pourront être convertis en véritables types `Date` MongoDB, et des champs dérivés (par exemple durée de séjour) pourront être ajoutés.
-
-### Index (pistes)
-
-À partir de ce modèle, des index pertinents pourraient être :
-
-- index sur `Medical Condition` (analyses par pathologie),
-- index sur `Doctor` ou `Hospital` (analyse d’activité),
-- index sur une future clé patient si un champ d’identifiant unique est ajouté.
-
-Ces index peuvent être créés dans une étape ultérieure, une fois les besoins de requêtage clarifiés.
+- chaînes : `Name`, `Gender`, `Blood Type`, `Medical Condition`, `Doctor`, `Hospital`, `Insurance Provider`, `Admission Type`, `Medication`, `Test Results` ;
+- entiers : `Age`, `Room Number` ;
+- flottant : `Billing Amount` ;
+- chaînes (format `YYYY-MM-DD`) : `Date of Admission`, `Discharge Date`.
 
 ### Authentification et rôles
 
-Dans la configuration actuelle :
+MongoDB n’est pas accessible en anonyme. Dans ce projet :
 
-- l’utilisateur `root` (défini via les variables d’environnement Docker) dispose de droits administrateur,
-- la connexion se fait via l’URI :
+- un utilisateur root `root-oc` est créé via les variables d’environnement `MONGO_INITDB_ROOT_USERNAME` et `MONGO_INITDB_ROOT_PASSWORD` ;
+- deux utilisateurs applicatifs sont créés automatiquement par `init-mongo/init-users.js` :
+
+  - `app_user` : rôle `readWrite` sur `medical_db` (compte applicatif) ;
+  - `analyst_user` : rôle `read` sur `medical_db` (compte analyste).
+
+Exemples d’URI de connexion :
 
 ```text
-mongodb://root:rootpassword@localhost:27017/medical_db?authSource=admin
+# Administrateur
+mongodb://root-oc:<mot_de_passe_root>@localhost:27017/medical_db?authSource=admin
+
+# Compte applicatif
+mongodb://app_user:<mot_de_passe_app>@localhost:27017/medical_db?authSource=medical_db
+
+# Compte analyste
+mongodb://analyst_user:<mot_de_passe_analyst>@localhost:27017/medical_db?authSource=medical_db
 ```
 
-Pour un environnement plus sécurisé, il est possible d’ajouter un utilisateur applicatif dédié avec un rôle `readWrite` limité à `medical_db` :
+En production, on applique le principe de moindre privilège :
 
-```js
-db.createUser({
-  user: "app_user",
-  pwd: "app_password",
-  roles: [
-    { role: "readWrite", db: "medical_db" }
-  ]
-});
-```
+- **Administrateur (DBA)** : gestion complète de la base (création d’utilisateurs, index, sauvegardes/restaurations).  
+- **Compte applicatif** : `readWrite` limité aux collections nécessaires (par ex. `medical_db.patients`).  
+- **Compte analyste** : `read` uniquement sur certaines collections (analyses et reporting).
 
-*(Cette création d’utilisateur pourra être automatisée avec un script d’init Docker dans la suite du projet.)*
+## Pistes d’industrialisation
 
-## Pistes d’évolution (tests, Docker Compose, AWS)
+Pour aller plus loin :
 
-Les améliorations suivantes sont prévues dans les étapes suivantes du projet :
-
-- **Tests automatisés** :
-  - scripts Python supplémentaires pour vérifier l’intégrité des données avant/après migration (types, doublons, valeurs manquantes),
-  - éventuelle intégration de `pytest` pour des tests plus complets.
-
-- **Docker Compose** :
-  - ajout d’un `docker-compose.yml` pour lancer automatiquement la base MongoDB et le conteneur de migration dans un même réseau Docker,
-  - utilisation de volumes pour persister les données MongoDB et monter le fichier CSV.
-
-- **Étude du déploiement sur AWS** :
-  - documentation des options de déploiement sur AWS (S3 pour le stockage des CSV et des sauvegardes, Amazon DocumentDB compatible MongoDB, déploiement de conteneurs sur ECS, etc.),
-  - cette étude sera fournie dans un document séparé (`docs/aws_research.md`) et servira de support à la présentation finale.
+- **Tests automatisés** : intégrer `tests/data_quality.py` dans une pipeline CI, ajouter des tests plus fins (contraintes métier, distributions, etc.) ;
+- **Docker Compose avancé** : ajouter un service dédié pour les tests, gérer les variables sensibles via un fichier `.env` non versionné ;
+- **Déploiement cloud** :
+  - stockage du CSV sur un bucket (par ex. Amazon S3) ;
+  - base NoSQL managée (MongoDB Atlas, Amazon DocumentDB) ;
+  - exécution du conteneur de migration sur un orchestrateur (ECS, Kubernetes) ;
+  - gestion des secrets via un service dédié (AWS Secrets Manager, Vault, etc.).
