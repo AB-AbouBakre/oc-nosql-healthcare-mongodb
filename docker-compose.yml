@@ -6,13 +6,16 @@ services:
     container_name: medical-mongo
     restart: unless-stopped
     environment:
-      MONGO_INITDB_ROOT_USERNAME: root
-      MONGO_INITDB_ROOT_PASSWORD: rootpassword
+      MONGO_INITDB_ROOT_USERNAME: root-oc
+      MONGO_INITDB_ROOT_PASSWORD: vQ7nZ3pL9r_cT2X
       MONGO_INITDB_DATABASE: medical_db
     ports:
       - "27017:27017"
     volumes:
       - mongo_data:/data/db
+      - ./init-mongo/init-users.js:/docker-entrypoint-initdb.d/init-users.js:ro
+    networks:
+      - medical-net
 
   migration:
     build: .
@@ -20,8 +23,14 @@ services:
     depends_on:
       - mongo
     environment:
-      MONGO_URI: "mongodb://root:rootpassword@mongo:27017/medical_db?authSource=admin"
+      MONGO_URI: "mongodb://root-oc:vQ7nZ3pL9r_cT2X@mongo:27017/medical_db?authSource=admin"
     command: ["python", "src/migrate.py"]
+    networks:
+      - medical-net
 
 volumes:
   mongo_data:
+
+networks:
+  medical-net:
+    driver: bridge

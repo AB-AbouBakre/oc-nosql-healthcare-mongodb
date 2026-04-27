@@ -1,9 +1,14 @@
 from pymongo import MongoClient
 import pandas as pd
 
-
 CSV_PATH = "data/healthcare_dataset.csv"
-MONGO_URI = "mongodb://root:rootpassword@localhost:27017/medical_db?authSource=admin"
+
+# URI alignée avec ta configuration Docker actuelle
+MONGO_URI = (
+    "mongodb://root-oc:vQ7nZ3pL9r_cT2X"
+    "@localhost:27017/medical_db?authSource=admin"
+)
+
 DB_NAME = "medical_db"
 COLLECTION_NAME = "patients"
 
@@ -40,7 +45,6 @@ def check_duplicates(df: pd.DataFrame, subset_cols=None) -> None:
     nb_dups = duplicated.sum()
     if nb_dups > 0:
         print(f"\n[CHECK] ATTENTION : {nb_dups} doublons détectés sur les colonnes {subset_cols}.")
-        # Exemple : en afficher quelques-uns
         print(df[duplicated].head())
     else:
         print(f"\n[CHECK] Aucun doublon détecté sur les colonnes {subset_cols}.")
@@ -55,7 +59,7 @@ def compare_csv_vs_mongo() -> None:
     print(f"- Nombre de lignes dans le CSV : {nb_csv}")
 
     # Connexion MongoDB
-    client = MongoClient(MONGO_URI)
+    client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=5000)
     db = client[DB_NAME]
     collection = db[COLLECTION_NAME]
 
