@@ -1,15 +1,19 @@
+import os
 from pymongo import MongoClient
 import pandas as pd
+from dotenv import load_dotenv
 
-CSV_PATH = "data/healthcare_dataset.csv"
+# Charger les variables depuis le fichier .env
+load_dotenv()
 
-# URI alignée avec ta configuration Docker actuelle
-MONGO_URI = (
-    "mongodb://root-oc:vQ7nZ3pL9r_cT2X"
-    "@localhost:27017/medical_db?authSource=admin"
-)
+CSV_PATH = os.getenv("CSV_PATH", "data/healthcare_dataset.csv")
 
-DB_NAME = "medical_db"
+# URI depuis les variables d'environnement
+MONGO_URI = os.getenv("MONGO_URI_LOCAL")
+if not MONGO_URI:
+    raise ValueError("❌ MONGO_URI_LOCAL manquant dans .env")
+
+DB_NAME = os.getenv("MONGO_DATABASE", "medical_db")
 COLLECTION_NAME = "patients"
 
 

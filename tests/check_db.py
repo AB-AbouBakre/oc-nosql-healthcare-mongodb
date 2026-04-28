@@ -1,14 +1,16 @@
+import os
 from pymongo import MongoClient
+from dotenv import load_dotenv
 
-# URI alignée avec ta config actuelle (user root-oc, mot de passe fort)
-MONGO_URI = (
-    "mongodb://root-oc:vQ7nZ3pL9r_cT2X"
-    "@localhost:27017/medical_db?authSource=admin"
-)
+load_dotenv()
+
+MONGO_URI = os.getenv("MONGO_URI_LOCAL")
+if not MONGO_URI:
+    raise ValueError(" MONGO_URI_LOCAL manquant dans .env")
 
 client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=5000)
-db = client["medical_db"]
-collection = db["patients"]  # adapte si le nom de ta collection est différent
+db = client[os.getenv("MONGO_DATABASE", "medical_db")]
+collection = db["patients"]
 
 print("Nombre de documents :", collection.count_documents({}))
 print("Exemple de document :")

@@ -1,19 +1,19 @@
 import os
 import pandas as pd
 from pymongo import MongoClient
+from dotenv import load_dotenv
 
-MONGO_URI = os.getenv(
-    "MONGO_URI",
-    "mongodb://root:rootpassword@localhost:27017/medical_db?authSource=admin"
-)
+# Charger les variables depuis le fichier .env
+load_dotenv()
 
-CSV_PATH = os.getenv(
-    "CSV_PATH",
-    "data/healthcare_dataset.csv"
-)
+MONGO_URI = os.getenv("MONGO_URI")
+if not MONGO_URI:
+    raise ValueError("❌ MONGO_URI manquant dans .env")
+
+CSV_PATH = os.getenv("CSV_PATH", "data/healthcare_dataset.csv")
 
 client = MongoClient(MONGO_URI)
-db = client["medical_db"]
+db = client[os.getenv("MONGO_DATABASE", "medical_db")]
 collection = db["patients"]
 
 print("Lecture du CSV...")
@@ -36,4 +36,3 @@ result = collection.insert_many(records)
 print(f"{len(result.inserted_ids)} documents insérés.")
 
 client.close()
-
