@@ -51,6 +51,43 @@ Pour exécuter ce projet :
 - **Python 3.x** pour exécuter les scripts locaux (`tests/data_quality.py`, `tests/check_db.py`) si nécessaire ;
 - Les dépendances Python (`pandas`, `pymongo`, …) installées via `pip install -r requirements.txt` si vous exécutez les scripts hors Docker.
 
+## Sécurité des credentials
+
+Les identifiants et mots de passe ne sont **pas stockés en clair** dans le code. La configuration utilise un fichier `.env` local qui est exclu du versionnement.
+
+### Configuration
+
+1. Créer un fichier `.env` à la racine du projet en se basant sur `.env.example` :
+
+```bash
+cp .env.example .env
+```
+
+2. Remplir les valeurs réelles dans `.env` :
+
+```env
+MONGO_ROOT_USERNAME=votre_username
+MONGO_ROOT_PASSWORD=votre_password
+MONGO_DATABASE=medical_db
+MONGO_URI=mongodb://votre_username:votre_password@mongo:27017/medical_db?authSource=admin
+MONGO_URI_LOCAL=mongodb://votre_username:votre_password@localhost:27017/medical_db?authSource=admin
+CSV_PATH=data/healthcare_dataset.csv
+```
+
+3. Le fichier `.env` est automatiquement ignoré par Git (voir `.gitignore`)
+
+### Utilisation des variables d'environnement
+
+- **Dans Docker** : les variables sont chargées via `env_file` dans `docker-compose.yml`
+- **En local** : les scripts Python utilisent `python-dotenv` pour charger `.env`
+
+**Fichiers concernés** :
+- `docker-compose.yml` : substitution de variables `${VARIABLE}`
+- `src/migrate.py` : `load_dotenv()` + `os.getenv()`
+- `tests/check_db.py` : `load_dotenv()` + `os.getenv()`
+- `tests/data_quality.py` : `load_dotenv()` + `os.getenv()`
+## Structure du projet
+
 ## Structure du projet
 
 ```text
@@ -58,15 +95,19 @@ oc-nosql-medical/
 ├── data/
 │   └── healthcare_dataset.csv      # Fichier CSV contenant les données médicales
 ├── src/
-│   └── migrate.py                  # Script principal de migration CSV → MongoDB
+│   ├── migrate.py                  # Script principal de migration CSV → MongoDB
+│   └── create_indexes.py           # Script de création automatique des index
 ├── tests/
 │   ├── check_db.py                 # Script de vérification rapide (compte / exemple)
-│   └── data_quality.py             # Script de contrôle qualité (count, NA, types, doublons)
+│   ├── data_quality.py             # Script de contrôle qualité (count, NA, types, doublons)
+│   └── test_indexes.py             # Script de test des performances des index
 ├── init-mongo/
 │   └── init-users.js               # Création automatique de app_user et analyst_user
-├── requirements.txt                # Dépendances Python (pymongo, pandas, …)
+├── requirements.txt                # Dépendances Python (pymongo, pandas, python-dotenv)
 ├── Dockerfile                      # Image Docker pour la migration
 ├── docker-compose.yml              # Orchestration MongoDB + migration
+├── .env.example                    # Template pour les variables d'environnement
+├── .gitignore                      # Exclusion de .env et fichiers sensibles
 ├── docs/
 │   └── schema.md                   # Schéma de la base MongoDB (structure des documents)
 └── README.md                       # Ce fichier
@@ -89,7 +130,17 @@ Assurez-vous que le fichier suivant existe :
 data/healthcare_dataset.csv
 ```
 
-### 3. Lancer MongoDB et la migration
+### 3. Configurer les variables d'environnement
+
+Créer le fichier `.env` à partir du template :
+
+```bash
+cp .env.example .env
+```
+
+Éditer `.env` et remplir les valeurs réelles (voir section [Sécurité des credentials](#sécurité-des-credentials)).
+
+### 4. Lancer MongoDB et la migration
 
 ```bash
 docker compose up --build
@@ -97,21 +148,37 @@ docker compose up --build
 
 Cette commande :
 
-- démarre le service **`medical-mongo`** (MongoDB) avec la base `medical_db`, en créant un utilisateur root `root-oc` avec un mot de passe fort ;
+- démarre le service **`medical-mongo`** (MongoDB) avec la base `medical_db`, en créant un utilisateur root depuis les variables d'environnement `.env` ;
 - monte le script `init-mongo/init-users.js` dans `/docker-entrypoint-initdb.d`, qui crée automatiquement :
   - `app_user` (rôle `readWrite` sur `medical_db`) ;
   - `analyst_user` (rôle `read` sur `medical_db`) ;
 - démarre le service **`medical-migration`**, qui :
-  - lit le CSV,
+  - exécute `src/migrate.py` pour charger les données CSV dans MongoDB ;
+  - exécute `src/create_indexes.py` pour créer les 9 index d'optimisation ;
   - affiche dans les logs :
 
     ```text
     Lecture du CSV...
     55500 lignes à insérer.
     55500 documents insérés.
+    
+    🔧 Création des index pour optimiser les requêtes...
+    ✓ Index créé : Hospital
+    ✓ Index créé : Medical Condition
+    ...
+    ✅ Total : 10 index créés (incluant l'index _id par défaut)
+    🎯 Création des index terminée avec succès !
     ```
 
-  - se termine une fois la migration terminée (code de sortie 0).
+  - se termine une fois la migration et l'indexation terminées (code de sortie 0).
+
+### 5. Arrêter les services
+
+```bash
+docker compose down -v
+```
+
+Cela arrête les conteneurs et supprime les volumes si nécessaire.
 
 ### 4. Arrêter les services
 
@@ -161,6 +228,58 @@ Il :
 - détecte les **doublons potentiels** sur les colonnes `Name`, `Date of Admission`, `Hospital` (environ 5 500 lignes, soit ~10 %, correspondant possiblement à des réadmissions ou enregistrements multiples).
 
 Ces contrôles permettent de documenter la qualité de la migration et les éventuelles limites (présence de doublons métier).
+
+## Optimisation des performances : Index MongoDB
+
+Pour améliorer les temps de réponse des requêtes, **9 index** ont été créés automatiquement sur la collection `patients`.
+
+### Index créés
+
+#### Index simples (6)
+
+| Champ | Usage | Performance |
+|-------|-------|-------------|
+| `Hospital` | Filtres par établissement | 3ms pour 7 résultats |
+| `Medical Condition` | Statistiques par pathologie | 15ms pour 9k résultats |
+| `Date of Admission` | Tri chronologique | 1ms pour les 10 plus récents |
+| `Doctor` | Filtres par médecin | Optimisé |
+| `Insurance Provider` | Analyses financières | Optimisé |
+| `Admission Type` | Emergency/Urgent/Elective | 25ms pour 18k résultats |
+
+#### Index composés (2)
+
+- **Hospital + Date of Admission** : Patients récents d'un hôpital (0ms, optimal pour dashboards temps réel)
+- **Medical Condition + Date** : Évolution temporelle d'une pathologie
+
+#### Index texte (1)
+
+- **Name** : Recherche full-text de patients par nom
+
+### Résultats des tests de performance
+
+Avec **55 500 documents** dans la collection :
+- ✅ Toutes les requêtes utilisent les index (stratégie `IXSCAN`/`FETCH`)
+- ✅ Temps de réponse **< 25ms** pour toutes les requêtes testées
+- ✅ Aucun scan complet de collection (`COLLSCAN` évité)
+
+### Création automatique des index
+
+Les index sont créés automatiquement lors du lancement de `docker compose up` via le script `src/create_indexes.py` qui s'exécute après la migration.
+
+### Vérification manuelle
+
+```bash
+# Tester les performances des index
+python tests/test_indexes.py
+
+# Ou se connecter à MongoDB directement
+docker exec -it medical-mongo mongosh -u root-oc -p <votre_password> --authenticationDatabase admin
+use medical_db
+db.patients.getIndexes()
+db.patients.find({"Hospital": "Sons and Miller"}).explain("executionStats")
+```
+
+**Note** : Le script `tests/test_indexes.py` utilise `EXPLAIN` pour vérifier que les index sont bien utilisés et mesurer les temps de réponse.
 
 ## Schéma MongoDB et authentification
 
@@ -229,14 +348,36 @@ En production, on applique le principe de moindre privilège :
 - **Compte applicatif** : `readWrite` limité aux collections nécessaires (par ex. `medical_db.patients`).  
 - **Compte analyste** : `read` uniquement sur certaines collections (analyses et reporting).
 
-## Pistes d’industrialisation
+## Pistes d'industrialisation
 
 Pour aller plus loin :
 
-- **Tests automatisés** : intégrer `tests/data_quality.py` dans une pipeline CI, ajouter des tests plus fins (contraintes métier, distributions, etc.) ;
-- **Docker Compose avancé** : ajouter un service dédié pour les tests, gérer les variables sensibles via un fichier `.env` non versionné ;
+- **Sécurité renforcée** :
+  - Rotation automatique des mots de passe via un gestionnaire de secrets (Vault, AWS Secrets Manager) ;
+  - Chiffrement des données au repos et en transit (TLS/SSL) ;
+  - Audit des accès MongoDB avec des logs détaillés ;
+  
+- **Optimisation des index** :
+  - Analyser les requêtes réelles via MongoDB Profiler ou Atlas Performance Advisor ;
+  - Créer des index partiels ou sparse pour économiser l'espace disque ;
+  - Monitorer l'utilisation des index avec `db.collection.aggregate([{$indexStats:{}}])` ;
+
+- **Tests automatisés** : 
+  - Intégrer `tests/data_quality.py` et `tests/test_indexes.py` dans une pipeline CI ;
+  - Ajouter des tests plus fins (contraintes métier, distributions, etc.) ;
+  - Tests de charge pour valider les performances sous charge ;
+
+- **Docker Compose avancé** : 
+  - Ajouter un service dédié pour les tests ;
+  - Utiliser Docker secrets pour les credentials en production ;
+
 - **Déploiement cloud** :
-  - stockage du CSV sur un bucket (par ex. Amazon S3) ;
-  - base NoSQL managée (MongoDB Atlas, Amazon DocumentDB) ;
-  - exécution du conteneur de migration sur un orchestrateur (ECS, Kubernetes) ;
-  - gestion des secrets via un service dédié (AWS Secrets Manager, Vault, etc.).
+  - Stockage du CSV sur un bucket (Amazon S3, Google Cloud Storage) ;
+  - Base NoSQL managée (MongoDB Atlas, Amazon DocumentDB) ;
+  - Exécution du conteneur de migration sur un orchestrateur (ECS, Kubernetes) ;
+  - Gestion des secrets via un service dédié (AWS Secrets Manager, Vault, etc.) ;
+  
+- **Monitoring et observabilité** :
+  - Intégration avec Prometheus/Grafana pour surveiller MongoDB ;
+  - Alertes automatiques sur les performances des index ;
+  - Logs centralisés (ELK Stack, CloudWatch).

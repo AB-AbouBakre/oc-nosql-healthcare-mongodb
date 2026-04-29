@@ -24,9 +24,9 @@ services:
     container_name: medical-migration
     depends_on:
       - mongo
-    environment:
-      MONGO_URI: ${MONGO_URI}
-    command: ["python", "src/migrate.py"]
+    env_file:
+      - .env
+    command: sh -c "python src/migrate.py && python src/create_indexes.py"
     networks:
       - medical-net
 
